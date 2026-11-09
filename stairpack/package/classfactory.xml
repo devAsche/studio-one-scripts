@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ClassFactory>
+	<Version
+		name="StairPack"
+		version="0.1.0"
+		vendor="devAsche"
+		copyright="(c) 2026 devAsche"
+		url="https://github.com/devAsche"/>
+
+	<ScriptClass
+		classID="{0D507B4D-4A90-4A2C-ABA8-13344CEE4D85}"
+		category="EditTask"
+		subCategory="TrackEdit"
+		name="階段テイクをまとめる"
+		sourceFile="stairpack.js"
+		functionName="createStairPackTask">
+		<Attribute id="menuPriority" value="100"/>
+		<Attribute id="TrackContextMenu" value="1"/>
+		<Attribute id="commandCategory" value="Track"/>
+	</ScriptClass>
+
+	<ScriptClass
+		classID="{76F2F934-AB83-4CDA-9CC6-EDDF2A58D28A}"
+		category="EditTask"
+		subCategory="TrackEdit"
+		name="階段テイクをまとめる（診断のみ）"
+		sourceFile="stairpack.js"
+		functionName="createStairPackDryRunTask">
+		<Attribute id="menuPriority" value="101"/>
+		<Attribute id="TrackContextMenu" value="1"/>
+		<Attribute id="commandCategory" value="Track"/>
+	</ScriptClass>
+</ClassFactory>

@@ -2,7 +2,7 @@
 <MetaInformation>
 	<Attribute id="Package:ID" value="devasche.stairpack"/>
 	<Attribute id="Package:Name" value="StairPack"/>
-	<Attribute id="Package:Version" value="0.1.0"/>
+	<Attribute id="Package:Version" value="0.2.0"/>
 	<Attribute id="Package:Vendor" value="devAsche"/>
 	<Attribute id="Package:Description" value="Pack staircase recording takes into the fewest tracks"/>
 </MetaInformation>

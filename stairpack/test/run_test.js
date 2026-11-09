@@ -22,6 +22,15 @@ global.Host = {
 };
 
 // ---- トラック/イベントのモック ----
+// Studio One 5.5 の実挙動に合わせ、transferEvent はイベントを曲の先頭(0秒)に置く。start(拍)は秒と同じ値で代用
+function makeEvent(name, s, e, track) {
+  return {
+    name, _s: s, _e: e, track, offset: 1.25,
+    get startTime() { const self = this; return { seconds: self._s, clone() { return { seconds: self._s }; } }; },
+    get endTime() { return { seconds: this._e }; },
+    get start() { return this._s; },
+  };
+}
 function makeTrack(t) {
   const tr = {
     name: t.name, mediaType: t.mediaType || "Audio", isFolder: 0,
@@ -31,7 +40,7 @@ function makeTrack(t) {
     createIterator() { const arr = this.events.slice(); let i = 0; return { next: () => arr[i++] || null }; },
     isEmpty() { return this.events.length === 0 ? 1 : 0; },
   };
-  tr.events = t.events.map((e) => ({ name: e.name, startTime: { seconds: e.s }, endTime: { seconds: e.e }, track: tr }));
+  tr.events = t.events.map((e) => makeEvent(e.name, e.s, e.e, tr));
   return tr;
 }
 let allTracks = data.map(makeTrack);
@@ -46,8 +55,12 @@ const functions = {
 if (!noTransfer)
   functions.transferEvent = (ev, dest) => {
     ev.track.events = ev.track.events.filter((x) => x !== ev);
+    const len = ev._e - ev._s; ev._s = 0; ev._e = len;
     dest.events.push(ev); ev.track = dest;
   };
+functions.moveEvent = (ev, t) => {
+  const ns = typeof t === "number" ? t : t.seconds; const len = ev._e - ev._s; ev._s = ns; ev._e = ns + len;
+};
 
 const context = {
   functions,
@@ -60,6 +73,8 @@ const context = {
 };
 
 // ---- 実行 ----
+const sig = (ts) => ts.flatMap((t) => t.events.map((e) => `${e.name}@${e.startTime.seconds.toFixed(4)}-${e.endTime.seconds.toFixed(4)}`)).sort().join("|");
+const sigBefore = sig(selected.filter((t) => !t.channel.mute));
 const before = selected.filter((t) => !t.channel.mute).reduce((n, t) => n + t.events.length, 0);
 const mutedBefore = selected.filter((t) => t.channel.mute).map((t) => t.name + ":" + t.events.length).join(",");
 const { StairPackTask } = require(process.env.SP_MODULE || path.join(__dirname, "..", "package", "stairpack.js"));
@@ -84,7 +99,9 @@ console.log("muted untouched:", mutedBefore === mutedAfter, mutedAfter);
 for (const t of active)
   console.log("  " + t.name.padEnd(10), t.events.slice().sort((a, b) => a.startTime.seconds - b.startTime.seconds)
     .map((e) => `[${e.startTime.seconds.toFixed(1)}-${e.endTime.seconds.toFixed(1)}]`).join(" "));
-const ok = before === after && overlaps === 0 && mutedBefore === mutedAfter;
+const samePositions = sigBefore === sig(active);
+console.log("positions preserved:", samePositions);
+const ok = before === after && overlaps === 0 && mutedBefore === mutedAfter && samePositions;
 console.log(ok ? "PASS" : "FAIL");
 if (process.env.SHOWLOG) console.log(Object.values(logFiles)[0].join("\n"));
 process.exit(ok ? 0 : 1);

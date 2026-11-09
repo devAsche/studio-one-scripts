@@ -11,7 +11,7 @@
 // ・実行ログを ドキュメント\Studio One\stairpack_log.txt に書き出す
 //************************************************************************************************
 
-var STAIRPACK_VERSION = "0.1.0";
+var STAIRPACK_VERSION = "0.2.0";
 var STAIRPACK_EPS = 0.0005; // 秒。これ以下の重なりは「重なっていない」とみなす
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -189,29 +189,122 @@ function spFindEventOnTrack (track, ref)
 	return null;
 }
 
+function spSameEvent (a, b)
+{
+	return Math.abs (a.s - b.s) < 0.0005 && Math.abs (a.e - b.e) < 0.0005 && a.name == b.name;
+}
+
+// transferEvent で移動先に新しく現れたイベントを探す（Studio One 5.5 では位置が曲の先頭に変わるため、位置ではなく長さで照合）
+function spFindTransferred (before, after, ref)
+{
+	var fresh = [];
+	for(var i = 0; i < after.length; i++)
+	{
+		var known = false;
+		for(var k = 0; k < before.length; k++)
+			if(spSameEvent (after[i], before[k])) { known = true; break; }
+		if(!known)
+			fresh.push (after[i]);
+	}
+	var len = ref.e - ref.s;
+	var byLen = [];
+	for(var j = 0; j < fresh.length; j++)
+		if(Math.abs ((fresh[j].e - fresh[j].s) - len) < 0.002)
+			byLen.push (fresh[j]);
+	for(var n = 0; n < byLen.length; n++)
+		if(byLen[n].name == ref.name)
+			return byLen[n];
+	if(byLen.length == 1)
+		return byLen[0];
+	if(fresh.length == 1)
+		return fresh[0];
+	return null;
+}
+
 function spMoveEvent (context, functions, move, log, state)
 {
-	// 方法A: functions.transferEvent(イベント, 移動先トラック)
-	if(typeof functions.transferEvent == "function")
+	if(typeof functions.transferEvent != "function")
 	{
-		try
-		{
-			state.attempted = true;
-			functions.transferEvent (move.ev.obj, move.to.obj);
-			try { Host.GUI.flushUpdates (); } catch(e) {}
-			if(spFindEventOnTrack (move.to.obj, move.ev) && !spFindEventOnTrack (move.from.obj, move.ev))
-				return "transferEvent";
-			log.add ("  transferEvent: 実行後の確認で移動が確認できず");
-		}
-		catch(e)
-		{
-			log.add ("  transferEvent: 例外 " + e);
-		}
-	}
-	else
 		log.add ("  transferEvent: 関数なし (" + typeof functions.transferEvent + ")");
+		return null;
+	}
+	var ev = move.ev;
+	var startTime = spSafe (function () { var t = ev.obj.startTime; return t.clone ? t.clone () : t; }, null);
+	var startBeats = spSafe (function () { return ev.obj.start; }, null);
+	var offsetBefore = spSafe (function () { return ev.obj.offset; }, undefined);
+	var destBefore = spCollectEvents (move.to.obj);
+	try
+	{
+		state.attempted = true;
+		functions.transferEvent (ev.obj, move.to.obj);
+		try { Host.GUI.flushUpdates (); } catch(e) {}
+	}
+	catch(e)
+	{
+		log.add ("  transferEvent: 例外 " + e);
+		return null;
+	}
 
-	return null;
+	var found = spFindTransferred (destBefore, spCollectEvents (move.to.obj), ev);
+	if(!found)
+	{
+		log.add ("  transferEvent 後、移動先にイベントが見つからない");
+		return null;
+	}
+	if(spFindEventOnTrack (move.from.obj, ev))
+	{
+		log.add ("  transferEvent 後も移動元にイベントが残っている（コピーされた可能性）");
+		return null;
+	}
+	if(state.firstLogged !== true)
+	{
+		log.add ("  transferEvent 直後の位置: " + found.s.toFixed (3) + "秒（元 " + ev.s.toFixed (3) + "秒） name='" + found.name + "' offset " +
+		         offsetBefore + " -> " + spSafe (function () { return found.obj.offset; }, undefined));
+		state.firstLogged = true;
+	}
+
+	// 位置がずれていれば元の位置に戻す
+	if(Math.abs (found.s - ev.s) >= 0.0005)
+	{
+		var tries = [];
+		if(startTime) tries.push (["Time", startTime]);
+		if(startBeats !== null) tries.push (["beats", startBeats]);
+		var placed = false;
+		for(var i = 0; i < tries.length && !placed; i++)
+		{
+			try
+			{
+				functions.moveEvent (found.obj, tries[i][1]);
+				try { Host.GUI.flushUpdates (); } catch(e) {}
+				var now = spFindTransferred (destBefore, spCollectEvents (move.to.obj), ev);
+				if(now && Math.abs (now.s - ev.s) < 0.0005 && Math.abs (now.e - ev.e) < 0.0005)
+				{
+					placed = true;
+					found = now;
+					if(state.placeMethod !== tries[i][0])
+						log.add ("  位置の戻し: moveEvent(" + tries[i][0] + ") で成功");
+					state.placeMethod = tries[i][0];
+				}
+				else
+					log.add ("  moveEvent(" + tries[i][0] + ") 後の位置 " + (now ? now.s.toFixed (3) : "不明") + "秒（目標 " + ev.s.toFixed (3) + "）");
+			}
+			catch(e)
+			{
+				log.add ("  moveEvent(" + tries[i][0] + "): 例外 " + e);
+			}
+		}
+		if(!placed)
+			return null;
+	}
+
+	// 中身（クリップ内の再生開始位置）が変わっていないか
+	var offsetAfter = spSafe (function () { return found.obj.offset; }, undefined);
+	if(offsetBefore !== undefined && offsetAfter !== undefined && Math.abs (offsetBefore - offsetAfter) > 0.0001)
+	{
+		log.add ("  offset が変わった: " + offsetBefore + " -> " + offsetAfter);
+		return null;
+	}
+	return "transferEvent+moveEvent";
 }
 
 function spDescribeApi (context, log)
